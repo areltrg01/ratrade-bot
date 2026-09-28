@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 
 from flask import Flask, render_template
 from supabase import create_client
@@ -61,6 +62,61 @@ else:
 
 
 # =========================
+# AUTOTRADER FIYAT MOTORU
+# =========================
+
+def auto_trader_monitor():
+
+    symbols = [
+        "BTCUSDT",
+        "ETHUSDT",
+        "BNBUSDT"
+    ]
+
+    print("================================")
+    print("AUTOTRADER FIYAT MOTORU BASLADI")
+    print("Takip edilen:", ", ".join(symbols))
+    print("EMIR GONDERME: KAPALI")
+    print("================================")
+
+    while True:
+        try:
+
+            if binance:
+
+                for symbol in symbols:
+
+                    data = binance.get_symbol_ticker(
+                        symbol=symbol
+                    )
+
+                    price = data["price"]
+
+                    print(
+                        f"[FIYAT] {symbol}: {price} USDT"
+                    )
+
+            time.sleep(15)
+
+        except Exception as e:
+
+            print(
+                "AUTOTRADER HATASI:",
+                e
+            )
+
+            time.sleep(15)
+
+
+if binance:
+
+    threading.Thread(
+        target=auto_trader_monitor,
+        daemon=True
+    ).start()
+
+
+# =========================
 # MINI APP
 # =========================
 
@@ -73,7 +129,10 @@ def home():
 # TELEGRAM
 # =========================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user = update.effective_user
 
