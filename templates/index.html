@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RaTrade</title>
 
+    <!-- Telegram Mini App -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
     <style>
         * {
             box-sizing: border-box;
@@ -162,8 +165,13 @@
         }
 
         @keyframes draw {
-            from { stroke-dashoffset: 500; }
-            to { stroke-dashoffset: 0; }
+            from {
+                stroke-dashoffset: 500;
+            }
+
+            to {
+                stroke-dashoffset: 0;
+            }
         }
 
         .trade-button {
@@ -263,40 +271,88 @@
 
 <div class="app">
 
+    <!-- ÜST -->
     <div class="top">
         <div class="brand">Ra<span>Trade</span></div>
-        <div class="status">● Sistem Aktif</div>
+
+        <div class="status">
+            ● Sistem Aktif
+        </div>
     </div>
 
+    <!-- BAKİYE -->
     <div class="balance">
-        <div class="small">Toplam Bakiye</div>
-        <div class="money">$0.00 <span>USDT</span></div>
-        <div class="profit">▲ +0.00% bugün</div>
+
+        <div class="small">
+            Toplam Bakiye
+        </div>
+
+        <div class="money">
+            $0.00 <span>USDT</span>
+        </div>
+
+        <div class="profit">
+            ▲ +0.00% bugün
+        </div>
+
     </div>
 
+    <!-- TRADE -->
     <div class="section">
-        <div class="section-title">🤖 Otomatik Trade</div>
+
+        <div class="section-title">
+            🤖 Otomatik Trade
+        </div>
 
         <div class="trade">
 
             <div class="coin">
-                <div class="coin-icon">₿</div>
 
-                <div>
-                    <div class="coin-name">BTC / USDT</div>
-                    <div class="coin-sub">Bitcoin</div>
+                <div class="coin-icon">
+                    ₿
                 </div>
 
-                <div class="trade-status">● AKTİF</div>
+                <div>
+                    <div class="coin-name">
+                        BTC / USDT
+                    </div>
+
+                    <div class="coin-sub">
+                        Bitcoin
+                    </div>
+                </div>
+
+                <div class="trade-status">
+                    ● AKTİF
+                </div>
+
             </div>
 
+            <!-- GRAFİK -->
             <div class="chart">
+
                 <svg viewBox="0 0 400 100" preserveAspectRatio="none">
+
                     <polyline
                         class="chart-line"
-                        points="0,80 35,70 70,78 105,50 140,60 175,35 210,45 245,25 280,38 315,15 350,28 400,8"
+                        points="
+                        0,80
+                        35,70
+                        70,78
+                        105,50
+                        140,60
+                        175,35
+                        210,45
+                        245,25
+                        280,38
+                        315,15
+                        350,28
+                        400,8
+                        "
                     />
+
                 </svg>
+
             </div>
 
             <button class="trade-button">
@@ -304,43 +360,77 @@
             </button>
 
         </div>
+
     </div>
 
+    <!-- İSTATİSTİKLER -->
     <div class="section">
-        <div class="section-title">📊 İstatistikler</div>
+
+        <div class="section-title">
+            📊 İstatistikler
+        </div>
 
         <div class="stats">
 
             <div class="stat">
-                <div class="stat-label">Toplam İşlem</div>
-                <div class="stat-value">0</div>
+                <div class="stat-label">
+                    Toplam İşlem
+                </div>
+
+                <div class="stat-value">
+                    0
+                </div>
             </div>
 
             <div class="stat">
-                <div class="stat-label">Başarılı İşlem</div>
-                <div class="stat-value">0</div>
+                <div class="stat-label">
+                    Başarılı İşlem
+                </div>
+
+                <div class="stat-value">
+                    0
+                </div>
             </div>
 
             <div class="stat">
-                <div class="stat-label">Toplam Kazanç</div>
-                <div class="stat-value">$0.00</div>
+                <div class="stat-label">
+                    Toplam Kazanç
+                </div>
+
+                <div class="stat-value">
+                    $0.00
+                </div>
             </div>
 
             <div class="stat">
-                <div class="stat-label">Bot Durumu</div>
-                <div class="stat-value" style="color:#36e0a0;">Aktif</div>
+                <div class="stat-label">
+                    Bot Durumu
+                </div>
+
+                <div class="stat-value" style="color:#36e0a0;">
+                    Aktif
+                </div>
             </div>
 
         </div>
 
         <div class="countdown">
-            <div class="countdown-title">Sistem yenilenmesine kalan süre</div>
-            <div class="time">23:59:59</div>
+
+            <div class="countdown-title">
+                Sistem yenilenmesine kalan süre
+            </div>
+
+            <div class="time">
+                23:59:59
+            </div>
+
         </div>
+
     </div>
 
 </div>
 
+<!-- ALT MENÜ -->
 <div class="nav">
 
     <div class="nav-item active">
@@ -364,6 +454,31 @@
     </div>
 
 </div>
+
+
+<!-- TELEGRAM BAĞLANTISI -->
+<script>
+
+    const tg = window.Telegram.WebApp;
+
+    // Mini App'i hazırla
+    tg.ready();
+
+    // Telegram ekranını genişlet
+    tg.expand();
+
+    // Telegram kullanıcısını kontrol et
+    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+
+        const user = tg.initDataUnsafe.user;
+
+        console.log("Telegram User ID:", user.id);
+        console.log("Telegram Username:", user.username);
+        console.log("Telegram Name:", user.first_name);
+
+    }
+
+</script>
 
 </body>
 </html>
