@@ -5,3 +5,4 @@ python-telegram-bot
 gunicorn
 supabase
 python-binance
+web3
