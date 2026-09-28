@@ -204,7 +204,12 @@ def monitor_bsc_deposits():
 
                 current_block = bsc.eth.block_number
 
-                if current_block > last_block:
+                scan_to = min(
+                    current_block,
+                    last_block + 5
+                )
+
+                if scan_to > last_block:
 
                     logs = bsc.eth.get_logs({
 
@@ -212,7 +217,7 @@ def monitor_bsc_deposits():
                             last_block + 1,
 
                         "toBlock":
-                            current_block,
+                            scan_to,
 
                         "address":
                             usdt_address,
@@ -270,7 +275,7 @@ def monitor_bsc_deposits():
                         print("================================")
                         print("")
 
-                    last_block = current_block
+                    last_block = scan_to
 
                 time.sleep(10)
 
