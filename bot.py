@@ -1,19 +1,45 @@
 import os
-import threading
 import time
+import threading
+import math
 from decimal import Decimal, ROUND_DOWN
 
-from flask import Flask, render_template
-from supabase import create_client
+from flask import Flask
 from binance.client import Client
+from binance.exceptions import BinanceAPIException
 
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
+
+# =========================================================
+# AYARLAR
+# =========================================================
+
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# SADECE TESTNET
+BINANCE_TESTNET = True
+
+TIMEFRAME = Client.KLINE_INTERVAL_15MINUTE
+
+# Kullanılacak bakiye
+BALANCE_PERCENT = 100.0
+
+# Kar / zarar
+TAKE_PROFIT_PERCENT = 10.0
+STOP_LOSS_PERCENT = 5.0
+
+# Her yeni 15 dakikalık mumda tarama
+SCAN_INTERVAL = 10
+
+# Her pariteden alınacak mum sayısı
+KLINE_LIMIT = 100
+
+# Minimum skor
+MIN_SCORE = 55.0
 
 # =========================================================
 # FLASK
@@ -22,866 +48,527 @@ from telegram.ext import (
 app = Flask(__name__)
 
 
-# =========================================================
-# SUPABASE
-# =========================================================
+@app.route("/")
+def home():
+    return "RA TRADE BOT AKTIF"
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-supabase = None
-
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        supabase = create_client(
-            SUPABASE_URL,
-            SUPABASE_KEY
-        )
-        print("SUPABASE BAGLANTISI OK")
-    except Exception as e:
-        print("SUPABASE BAGLANTI HATASI:", e)
+@app.route("/health")
+def health():
+    return "OK"
 
 
 # =========================================================
-# BINANCE TESTNET
+# BINANCE
 # =========================================================
-
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 binance = None
 
 if BINANCE_API_KEY and BINANCE_API_SECRET:
-
     try:
-
         binance = Client(
             BINANCE_API_KEY,
             BINANCE_API_SECRET,
-            testnet=True
+            testnet=BINANCE_TESTNET
         )
 
-        account = binance.get_account()
-
-        print("================================")
         print("BINANCE TESTNET BAGLANTISI OK")
-        print("Binance hesabina erisim basarili")
-        print("================================")
-
-        for balance in account["balances"]:
-
-            if float(balance["free"]) > 0:
-
-                print(
-                    balance["asset"],
-                    balance["free"]
-                )
-
-    except Exception as e:
-
-        print(
-            "BINANCE BAGLANTI HATASI:",
-            e
-        )
-
-        binance = None
-
-else:
-
-    print(
-        "BINANCE API bilgileri bulunamadi!"
-    )
-
-
-# =========================================================
-# AUTOTRADER AYARLARI
-# =========================================================
-
-TIMEFRAME = Client.KLINE_INTERVAL_15MINUTE
-
-BALANCE_PERCENT = 100.0
-
-TAKE_PROFIT_PERCENT = 10.0
-
-STOP_LOSS_PERCENT = 5.0
-
-SCAN_INTERVAL = 30
-
-KLINE_LIMIT = 100
-
-MIN_SCORE = 55.0
-
-
-# =========================================================
-# LOCK
-# =========================================================
-
-buy_lock = threading.Lock()
-
-
-# =========================================================
-# POZISYON
-# =========================================================
-
-position_open = False
-
-position_symbol = None
-
-entry_price = 0.0
-
-position_quantity = 0.0
-
-last_scanned_candle = None
-
-
-# =========================================================
-# AKTIF USDT PARITELERI
-# =========================================================
-
-def get_usdt_symbols():
-
-    info = binance.get_exchange_info()
-
-    symbols = []
-
-    for item in info["symbols"]:
 
         try:
+            account = binance.get_account()
 
-            if (
-                item["status"] == "TRADING"
-                and item["quoteAsset"] == "USDT"
-                and item.get(
-                    "isSpotTradingAllowed",
-                    False
-                )
-            ):
+            usdt_balance = 0.0
 
-                symbols.append(
-                    item["symbol"]
-                )
+            for asset in account.get("balances", []):
+                if asset["asset"] == "USDT":
+                    usdt_balance = float(asset["free"])
+                    break
 
-        except Exception:
+            print("Binance hesabina erisim basarili")
+            print(f"USDT {usdt_balance}")
 
-            continue
+        except Exception as e:
+            print("[BINANCE ACCOUNT ERROR]", e)
 
-    print("================================")
-    print(
-        f"[SYMBOLS] {len(symbols)} aktif USDT paritesi bulundu."
-    )
-    print("================================")
-
-    return symbols
+    except Exception as e:
+        print("[BINANCE BAGLANTI HATASI]", e)
+        binance = None
+else:
+    print("[BINANCE] API bilgileri eksik")
 
 
 # =========================================================
-# EMA
+# AUTOTRADER DEĞİŞKENLERİ
 # =========================================================
+
+position = None
+
+symbols = []
+
+last_closed_candle = None
+
+trader_running = False
+
+
+# =========================================================
+# YARDIMCI
+# =========================================================
+
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
 
 def calculate_ema(values, period):
+    if not values:
+        return 0.0
 
     if len(values) < period:
-        return None
+        return sum(values) / len(values)
 
     multiplier = 2 / (period + 1)
 
-    ema = sum(
-        values[:period]
-    ) / period
+    ema = sum(values[:period]) / period
 
     for price in values[period:]:
-
-        ema = (
-            (price - ema)
-            * multiplier
-        ) + ema
+        ema = (price - ema) * multiplier + ema
 
     return ema
 
 
-# =========================================================
-# RSI
-# =========================================================
-
 def calculate_rsi(values, period=14):
-
-    if len(values) < period + 1:
-        return None
+    if len(values) <= period:
+        return 50.0
 
     gains = []
-
     losses = []
 
-    for i in range(
-        1,
-        len(values)
-    ):
-
-        change = (
-            values[i]
-            - values[i - 1]
-        )
+    for i in range(1, len(values)):
+        change = values[i] - values[i - 1]
 
         if change > 0:
-
             gains.append(change)
             losses.append(0)
-
         else:
-
             gains.append(0)
-            losses.append(
-                abs(change)
-            )
+            losses.append(abs(change))
 
-    avg_gain = (
-        sum(gains[:period])
-        / period
-    )
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
 
-    avg_loss = (
-        sum(losses[:period])
-        / period
-    )
-
-    for i in range(
-        period,
-        len(gains)
-    ):
-
-        avg_gain = (
-            (
-                avg_gain
-                * (period - 1)
-            )
-            + gains[i]
-        ) / period
-
-        avg_loss = (
-            (
-                avg_loss
-                * (period - 1)
-            )
-            + losses[i]
-        ) / period
+    for i in range(period, len(gains)):
+        avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
+        avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
 
     if avg_loss == 0:
         return 100.0
 
-    rs = (
-        avg_gain
-        / avg_loss
-    )
+    rs = avg_gain / avg_loss
 
-    return 100 - (
-        100 / (1 + rs)
-    )
+    return 100 - (100 / (1 + rs))
 
 
-# =========================================================
-# ATR
-# =========================================================
-
-def calculate_atr(
-    candles,
-    period=14
-):
-
-    if len(candles) < period + 1:
-        return None
+def calculate_atr(highs, lows, closes, period=14):
+    if len(closes) <= period:
+        return 0.0
 
     true_ranges = []
 
-    previous_close = float(
-        candles[0][4]
-    )
-
-    for candle in candles[1:]:
-
-        high = float(candle[2])
-
-        low = float(candle[3])
+    for i in range(1, len(closes)):
+        high = highs[i]
+        low = lows[i]
+        previous_close = closes[i - 1]
 
         tr = max(
             high - low,
-            abs(
-                high
-                - previous_close
-            ),
-            abs(
-                low
-                - previous_close
-            )
+            abs(high - previous_close),
+            abs(low - previous_close)
         )
 
         true_ranges.append(tr)
 
-        previous_close = float(
-            candle[4]
-        )
+    if len(true_ranges) < period:
+        return 0.0
 
-    return (
-        sum(
-            true_ranges[-period:]
-        ) / period
-    )
+    return sum(true_ranges[-period:]) / period
 
 
 # =========================================================
-# PARITE KURALLARI
+# USDT PARİTELERİ
 # =========================================================
 
-def get_symbol_rules(symbol):
+def get_usdt_symbols():
 
-    info = binance.get_symbol_info(
-        symbol
-    )
+    global symbols
 
-    if not info:
+    try:
+        exchange_info = binance.get_exchange_info()
 
-        raise RuntimeError(
-            f"Symbol bilgisi bulunamadi: {symbol}"
-        )
+        result = []
 
-    step_size = 0.000001
+        for item in exchange_info.get("symbols", []):
 
-    min_qty = 0.0
+            if item.get("status") != "TRADING":
+                continue
 
-    min_notional = 0.0
+            if item.get("quoteAsset") != "USDT":
+                continue
 
-    max_notional = 0.0
+            if not item.get("isSpotTradingAllowed", True):
+                continue
 
-    for f in info["filters"]:
+            symbol = item.get("symbol")
 
-        filter_type = f[
-            "filterType"
-        ]
+            if symbol:
+                result.append(symbol)
 
-        # MARKET_LOT_SIZE varsa
-        # market emirleri icin onu kullan.
-        if filter_type == "MARKET_LOT_SIZE":
+        result = sorted(set(result))
 
-            step_size = float(
-                f["stepSize"]
-            )
+        symbols = result
 
-            min_qty = float(
-                f["minQty"]
-            )
+        print(f"[SYMBOLS] {len(result)} aktif USDT paritesi bulundu.")
 
-        elif (
-            filter_type
-            == "LOT_SIZE"
-        ):
+        return result
 
-            if step_size == 0.000001:
-
-                step_size = float(
-                    f["stepSize"]
-                )
-
-                min_qty = float(
-                    f["minQty"]
-                )
-
-        elif filter_type in (
-            "MIN_NOTIONAL",
-            "NOTIONAL"
-        ):
-
-            min_notional = max(
-                min_notional,
-                float(
-                    f.get(
-                        "minNotional",
-                        0
-                    )
-                )
-            )
-
-            max_notional = max(
-                max_notional,
-                float(
-                    f.get(
-                        "maxNotional",
-                        0
-                    )
-                )
-            )
-
-    return (
-        step_size,
-        min_qty,
-        min_notional,
-        max_notional
-    )
+    except Exception as e:
+        print("[SYMBOL ERROR]", e)
+        return []
 
 
 # =========================================================
-# PARITE ANALIZI
+# PARİTE ANALİZİ
 # =========================================================
 
 def analyze_symbol(symbol):
 
-    candles = binance.get_klines(
-        symbol=symbol,
-        interval=TIMEFRAME,
-        limit=KLINE_LIMIT
-    )
+    try:
 
-    if len(candles) < 60:
-        return None
+        candles = binance.get_klines(
+            symbol=symbol,
+            interval=TIMEFRAME,
+            limit=KLINE_LIMIT
+        )
 
-    # Son mum kapanmamis olabilir.
-    # Sadece kapanmis mumlari kullan.
-    closed = candles[:-1]
+        if not candles or len(candles) < 30:
+            return None
 
-    closes = [
-        float(c[4])
-        for c in closed
-    ]
+        # Son mum açık olabilir.
+        # Sadece kapanmış mumları kullanıyoruz.
+        closed_candles = candles[:-1]
 
-    highs = [
-        float(c[2])
-        for c in closed
-    ]
+        if len(closed_candles) < 30:
+            return None
 
-    volumes = [
-        float(c[5])
-        for c in closed
-    ]
+        opens = [safe_float(x[1]) for x in closed_candles]
+        highs = [safe_float(x[2]) for x in closed_candles]
+        lows = [safe_float(x[3]) for x in closed_candles]
+        closes = [safe_float(x[4]) for x in closed_candles]
+        volumes = [safe_float(x[5]) for x in closed_candles]
 
-    if len(closes) < 55:
-        return None
+        if not closes:
+            return None
 
-    current = closes[-1]
+        price = closes[-1]
 
-    ema20 = calculate_ema(
-        closes,
-        20
-    )
+        # -------------------------------------------------
+        # EMA
+        # -------------------------------------------------
 
-    ema50 = calculate_ema(
-        closes,
-        50
-    )
+        ema20 = calculate_ema(closes, 20)
+        ema50 = calculate_ema(closes, 50)
 
-    rsi = calculate_rsi(
-        closes,
-        14
-    )
+        # -------------------------------------------------
+        # RSI
+        # -------------------------------------------------
 
-    atr = calculate_atr(
-        closed,
-        14
-    )
+        rsi = calculate_rsi(closes, 14)
 
-    if (
-        ema20 is None
-        or ema50 is None
-        or rsi is None
-        or atr is None
-    ):
+        # -------------------------------------------------
+        # ATR
+        # -------------------------------------------------
 
-        return None
+        atr = calculate_atr(
+            highs,
+            lows,
+            closes,
+            14
+        )
 
-    # =====================================================
-    # ONEMLI:
-    # Bunlar HER DURUMDA once tanimlaniyor.
-    # volume_ratio hatasi artik olusmayacak.
-    # =====================================================
+        # -------------------------------------------------
+        # MOMENTUM
+        # -------------------------------------------------
 
-    momentum = 0.0
+        momentum = 0.0
 
-    volume_ratio = 0.0
+        if len(closes) >= 7:
 
-    # Momentum
+            old_price = closes[-7]
 
-    if len(closes) >= 6:
-
-        old_price = closes[-6]
-
-        if old_price > 0:
-
-            momentum = (
-                (
-                    closes[-1]
+            if old_price > 0:
+                momentum = (
+                    (price - old_price)
                     / old_price
-                ) - 1
-            ) * 100
+                ) * 100
 
-    # Volume
+        # -------------------------------------------------
+        # VOLUME RATIO
+        # ÖNEMLİ:
+        # Burada artık her durumda değer atanıyor.
+        # volume_ratio hatası olmayacak.
+        # -------------------------------------------------
 
-    if len(volumes) >= 21:
+        volume_ratio = 1.0
 
-        average_volume = (
-            sum(
-                volumes[-21:-1]
-            ) / 20
-        )
+        if len(volumes) >= 21:
 
-        if average_volume > 0:
+            previous_volumes = volumes[-21:-1]
 
-            volume_ratio = (
-                volumes[-1]
-                / average_volume
+            if previous_volumes:
+
+                average_volume = (
+                    sum(previous_volumes)
+                    / len(previous_volumes)
+                )
+
+                if average_volume > 0:
+
+                    volume_ratio = (
+                        volumes[-1]
+                        / average_volume
+                    )
+
+        # -------------------------------------------------
+        # BREAKOUT
+        # -------------------------------------------------
+
+        breakout = False
+
+        if len(highs) >= 21:
+
+            previous_highs = highs[-21:-1]
+
+            if previous_highs:
+
+                highest_previous = max(previous_highs)
+
+                if price > highest_previous:
+                    breakout = True
+
+        # -------------------------------------------------
+        # SCORE
+        # -------------------------------------------------
+
+        score = 0.0
+
+        # Trend
+        if ema20 > ema50:
+
+            score += 25
+
+            # EMA farkı ne kadar büyükse ekstra puan
+            trend_percent = (
+                (ema20 - ema50)
+                / ema50
+            ) * 100 if ema50 > 0 else 0
+
+            if trend_percent >= 2:
+                score += 5
+
+        # Fiyat EMA20 üstünde
+        if price > ema20:
+
+            score += 15
+
+            price_distance = (
+                (price - ema20)
+                / ema20
+            ) * 100 if ema20 > 0 else 0
+
+            if price_distance >= 1:
+                score += 3
+
+        # Momentum
+        if momentum > 0:
+
+            momentum_score = min(
+                max(momentum * 2, 0),
+                20
             )
 
-    # =====================================================
-    # SKOR
-    # =====================================================
+            score += momentum_score
 
-    score = 0.0
+        # RSI
+        if 50 <= rsi <= 70:
 
-    # 1 TREND - 25
+            score += 15
 
-    if ema20 > ema50:
+        elif 45 <= rsi < 50:
 
-        score += 15
+            score += 8
 
-        ema_gap = (
-            (
-                ema20
-                - ema50
-            )
-            / ema50
-        ) * 100
+        elif 70 < rsi <= 75:
 
-        score += min(
-            10,
-            max(
-                0,
-                ema_gap * 5
-            )
-        )
+            score += 8
 
-    else:
+        # Volume
+        if volume_ratio >= 1.5:
 
-        score -= 20
+            score += 15
 
-    # 2 PRICE / EMA20 - 15
+        elif volume_ratio >= 1.2:
 
-    if current > ema20:
+            score += 12
 
-        distance = (
-            (
-                current
-                - ema20
-            )
-            / ema20
-        ) * 100
+        elif volume_ratio >= 1.0:
 
-        score += min(
-            15,
-            max(
-                0,
-                distance * 5
-            )
-        )
+            score += 8
 
-    # 3 MOMENTUM - 20
+        elif volume_ratio >= 0.8:
 
-    if momentum > 0:
+            score += 4
 
-        score += min(
-            20,
-            momentum * 8
-        )
-
-    else:
-
-        score += max(
-            -10,
-            momentum * 3
-        )
-
-    # 4 RSI - 15
-
-    if 50 <= rsi <= 70:
-
-        rsi_score = (
-            15
-            - abs(rsi - 60)
-            * 0.5
-        )
-
-        score += max(
-            0,
-            rsi_score
-        )
-
-    elif 70 < rsi <= 75:
-
-        score += 5
-
-    elif rsi > 75:
-
-        score -= 10
-
-    # 5 VOLUME - 15
-
-    if volume_ratio >= 1:
-
-        score += min(
-            15,
-            volume_ratio * 7
-        )
-
-    # 6 BREAKOUT - 10
-
-    if len(highs) >= 21:
-
-        previous_high = max(
-            highs[-21:-1]
-        )
-
-        if current > previous_high:
+        # Breakout
+        if breakout:
 
             score += 10
 
-    # ATR
+        # ATR aşırı yüksekse biraz puan düşür
+        if price > 0 and atr > 0:
 
-    atr_percent = (
-        atr
-        / current
-    ) * 100
+            atr_percent = (
+                atr / price
+            ) * 100
 
-    if atr_percent < 0.15:
+            if atr_percent > 8:
 
-        score -= 5
+                score -= 10
 
-    if atr_percent > 8:
+            elif atr_percent > 5:
 
-        score -= 5
+                score -= 5
 
-    return {
+        # 0-100 arasında tut
+        score = max(
+            0.0,
+            min(score, 100.0)
+        )
 
-        "symbol": symbol,
+        return {
+            "symbol": symbol,
+            "score": round(score, 2),
+            "price": price,
+            "ema20": ema20,
+            "ema50": ema50,
+            "rsi": rsi,
+            "momentum": momentum,
+            "volume_ratio": volume_ratio,
+            "atr": atr,
+            "breakout": breakout
+        }
 
-        "score": round(
-            score,
-            2
-        ),
+    except Exception as e:
 
-        "price": current,
+        print(
+            f"[SCAN ERROR] {symbol}: {e}"
+        )
 
-        "ema20": ema20,
-
-        "ema50": ema50,
-
-        "rsi": rsi,
-
-        "atr_percent":
-            atr_percent,
-
-        "momentum":
-            momentum,
-
-        "volume_ratio":
-            volume_ratio,
-
-    }
+        return None
 
 
 # =========================================================
-# EN GUCLU PARITE
+# 487 PARİTE TARAMASI
 # =========================================================
 
-def find_best_symbol(
-    symbols,
-    usdt_balance
-):
+def find_best_symbol():
+
+    if not symbols:
+
+        print("[SCAN] Parite listesi bos.")
+
+        return None
+
+    print()
+    print("=" * 60)
+    print("[SCAN] 487+ parite taramasi basliyor...")
+    print("=" * 60)
 
     results = []
 
     total = len(symbols)
 
-    print("================================")
+    for index, symbol in enumerate(symbols, start=1):
 
-    print(
-        f"[SCAN] {total} parite taranacak."
-    )
+        result = analyze_symbol(symbol)
 
-    print(
-        "[SCAN] 15 dakikalik kapanmis mumlar kullaniliyor."
-    )
+        if result is not None:
 
-    print("================================")
+            results.append(result)
 
-    for index, symbol in enumerate(
-        symbols,
-        start=1
-    ):
-
-        try:
-
-            # -------------------------------------------------
-            # Onemli:
-            # %100 USDT ile BUY yapilamayan pariteleri
-            # en bastan ele.
-            # -------------------------------------------------
-
-            try:
-
-                (
-                    step_size,
-                    min_qty,
-                    min_notional,
-                    max_notional
-                ) = get_symbol_rules(
-                    symbol
-                )
-
-            except Exception:
-
-                continue
-
-            if (
-                min_notional > 0
-                and usdt_balance
-                < min_notional
-            ):
-
-                continue
-
-            if (
-                max_notional > 0
-                and usdt_balance
-                > max_notional
-            ):
-
-                # Bu pariteye %100 bakiye sigmiyor.
-                # Baska parite ara.
-                continue
-
-            result = analyze_symbol(
-                symbol
-            )
-
-            if result:
-
-                results.append(
-                    result
-                )
-
-            # Binance'i gereksiz
-            # hizlandirmamak icin.
-            time.sleep(0.08)
-
-            if index % 25 == 0:
-
-                print(
-                    f"[SCAN] {index}/{total} tamamlandi..."
-                )
-
-        except Exception as e:
+        if index % 25 == 0 or index == total:
 
             print(
-                f"[SCAN ERROR] {symbol}: {e}"
+                f"[SCAN] {index}/{total} tamamlandi..."
             )
+
+        # Binance rate limit'i zorlamamak için
+        time.sleep(0.05)
 
     if not results:
 
-        print(
-            "[SCAN] Gecerli analiz bulunamadi."
-        )
+        print("[SCAN] Gecerli sonuc bulunamadi.")
 
         return None
 
-    # Skora gore buyukten kucuge.
+    # Skora göre büyükten küçüğe sırala
     results.sort(
-        key=lambda x:
-            x["score"],
+        key=lambda x: x["score"],
         reverse=True
     )
 
     best = results[0]
 
-    print("================================")
+    print()
     print("🏆 EN GUCLU PARITE")
-    print("================================")
+    print(f"PARITE: {best['symbol']}")
+    print(f"SKOR: {best['score']}")
+    print(f"FIYAT: {best['price']}")
+    print(f"EMA20: {best['ema20']}")
+    print(f"EMA50: {best['ema50']}")
+    print(f"RSI: {best['rsi']:.2f}")
+    print(f"MOMENTUM: {best['momentum']:.2f}%")
+    print(f"VOLUME RATIO: {best['volume_ratio']:.2f}")
+    print(f"ATR: {best['atr']}")
+    print(f"BREAKOUT: {best['breakout']}")
 
-    print(
-        "PARITE:",
-        best["symbol"]
-    )
+    print()
+    print("🏆 TOP 10")
 
-    print(
-        "SKOR:",
-        best["score"]
-    )
-
-    print(
-        "FIYAT:",
-        best["price"]
-    )
-
-    print(
-        "EMA20:",
-        best["ema20"]
-    )
-
-    print(
-        "EMA50:",
-        best["ema50"]
-    )
-
-    print(
-        "RSI:",
-        round(
-            best["rsi"],
-            2
-        )
-    )
-
-    print(
-        "MOMENTUM:",
-        round(
-            best["momentum"],
-            2
-        ),
-        "%"
-    )
-
-    print(
-        "HACIM ORANI:",
-        round(
-            best["volume_ratio"],
-            2
-        )
-    )
-
-    print(
-        "ATR:",
-        round(
-            best["atr_percent"],
-            2
-        ),
-        "%"
-    )
-
-    print("================================")
-
-    print("TOP 10:")
-
-    for item in results[:10]:
+    for i, item in enumerate(
+        results[:10],
+        start=1
+    ):
 
         print(
-            f"{item['symbol']} | "
-            f"Skor: {item['score']} | "
-            f"RSI: {item['rsi']:.2f} | "
-            f"Momentum: {item['momentum']:.2f}% | "
-            f"Hacim: {item['volume_ratio']:.2f}"
+            f"{i}. {item['symbol']} "
+            f"| SKOR {item['score']} "
+            f"| RSI {item['rsi']:.2f} "
+            f"| MOM {item['momentum']:.2f}% "
+            f"| VOL {item['volume_ratio']:.2f}"
         )
 
-    print("================================")
+    print("=" * 60)
 
     if best["score"] < MIN_SCORE:
 
         print(
-            f"[NO TRADE] En yuksek skor "
-            f"{best['score']}. "
-            f"Minimum: {MIN_SCORE}"
+            f"[TRADE] En yuksek skor {best['score']}."
+        )
+
+        print(
+            f"[TRADE] Minimum skor {MIN_SCORE}. "
+            f"Bu mumda ALIM YOK."
         )
 
         return None
@@ -890,742 +577,416 @@ def find_best_symbol(
 
 
 # =========================================================
-# ACCOUNT
+# SEMBOL FİLTRELERİ
 # =========================================================
 
-def get_account():
-
-    return binance.get_account()
-
-
-# =========================================================
-# USDT BALANCE
-# =========================================================
-
-def get_usdt_balance():
-
-    account = get_account()
-
-    for balance in account["balances"]:
-
-        if balance["asset"] == "USDT":
-
-            return float(
-                balance["free"]
-            )
-
-    return 0.0
-
-
-# =========================================================
-# ASSET BALANCE
-# =========================================================
-
-def get_asset_balance(asset):
-
-    account = get_account()
-
-    for balance in account["balances"]:
-
-        if balance["asset"] == asset:
-
-            return float(
-                balance["free"]
-            )
-
-    return 0.0
-
-
-# =========================================================
-# QUANTITY YUVARLAMA
-# =========================================================
-
-def round_quantity(
-    quantity,
-    step_size
-):
-
-    step = Decimal(
-        str(step_size)
-    )
-
-    value = Decimal(
-        str(quantity)
-    )
-
-    rounded = (
-        value / step
-    ).to_integral_value(
-        rounding=ROUND_DOWN
-    ) * step
-
-    return float(
-        rounded
-    )
-
-
-# =========================================================
-# MEVCUT POZISYONU BUL
-# =========================================================
-
-def find_existing_position(
-    symbols
-):
-
-    global position_open
-    global position_symbol
-    global position_quantity
-    global entry_price
+def get_symbol_filters(symbol):
 
     try:
 
-        account = get_account()
+        info = binance.get_symbol_info(symbol)
 
-        balances = {
-            b["asset"]:
-                float(b["free"])
+        if not info:
+            return None
 
-            for b in account[
-                "balances"
-            ]
+        filters = {}
 
-            if float(
-                b["free"]
-            ) > 0
-        }
+        for f in info.get("filters", []):
 
-        tickers = (
-            binance.get_all_tickers()
+            filter_type = f.get("filterType")
+
+            filters[filter_type] = f
+
+        return filters
+
+    except Exception as e:
+
+        print(
+            f"[FILTER ERROR] {symbol}: {e}"
         )
 
-        prices = {
-            x["symbol"]:
-                float(x["price"])
+        return None
 
-            for x in tickers
-        }
 
-        candidates = []
+def round_quantity(symbol, quantity):
 
-        for symbol in symbols:
+    filters = get_symbol_filters(symbol)
 
-            if not symbol.endswith(
-                "USDT"
-            ):
+    if not filters:
+        return quantity
 
-                continue
+    # Market emirlerinde varsa MARKET_LOT_SIZE kullan
+    lot_filter = (
+        filters.get("MARKET_LOT_SIZE")
+        or filters.get("LOT_SIZE")
+    )
 
-            base = symbol[:-4]
+    if not lot_filter:
+        return quantity
 
-            qty = balances.get(
-                base,
-                0.0
-            )
+    step_size = safe_float(
+        lot_filter.get("stepSize"),
+        0
+    )
 
-            price = prices.get(
-                symbol,
-                0.0
-            )
+    min_qty = safe_float(
+        lot_filter.get("minQty"),
+        0
+    )
 
-            if qty <= 0:
-                continue
+    if step_size <= 0:
+        return quantity
 
-            if price <= 0:
-                continue
+    quantity_decimal = Decimal(
+        str(quantity)
+    )
 
-            try:
+    step_decimal = Decimal(
+        str(step_size)
+    )
 
-                (
-                    step_size,
-                    min_qty,
-                    min_notional,
-                    max_notional
-                ) = get_symbol_rules(
-                    symbol
+    rounded = (
+        quantity_decimal
+        / step_decimal
+    ).to_integral_value(
+        rounding=ROUND_DOWN
+    ) * step_decimal
+
+    rounded_quantity = float(
+        rounded
+    )
+
+    if rounded_quantity < min_qty:
+        return 0.0
+
+    return rounded_quantity
+
+
+# =========================================================
+# USDT BAKİYE
+# =========================================================
+
+def get_free_usdt():
+
+    try:
+
+        account = binance.get_account()
+
+        for asset in account.get("balances", []):
+
+            if asset["asset"] == "USDT":
+
+                return safe_float(
+                    asset["free"]
                 )
 
-            except Exception:
+    except Exception as e:
 
-                continue
+        print(
+            "[BALANCE ERROR]",
+            e
+        )
 
-            value = (
-                qty
-                * price
+    return 0.0
+
+
+# =========================================================
+# ALIM
+# =========================================================
+
+def buy_symbol(symbol):
+
+    global position
+
+    try:
+
+        usdt_balance = get_free_usdt()
+
+        if usdt_balance <= 0:
+
+            print(
+                "[BUY] USDT bakiyesi yok."
             )
-
-            threshold = max(
-                min_notional,
-                1.0
-            )
-
-            if value >= threshold:
-
-                candidates.append(
-                    (
-                        value,
-                        symbol,
-                        qty,
-                        price
-                    )
-                )
-
-        if not candidates:
 
             return False
 
-        candidates.sort(
-            reverse=True
+        trade_amount = (
+            usdt_balance
+            * BALANCE_PERCENT
+            / 100
         )
 
-        (
-            _,
-            symbol,
-            qty,
-            current_price
-        ) = candidates[0]
+        print()
+        print("🟢 BUY")
+        print(f"PARITE: {symbol}")
+        print(f"USDT: {trade_amount}")
 
-        recovered_entry = (
-            current_price
-        )
-
+        # İlk deneme %100
         try:
 
-            trades = (
-                binance.get_my_trades(
-                    symbol=symbol,
-                    limit=50
+            order = binance.create_order(
+                symbol=symbol,
+                side="BUY",
+                type="MARKET",
+                quoteOrderQty=round(
+                    trade_amount,
+                    2
                 )
             )
 
-            buys = [
-                t
-                for t in trades
-                if t.get(
-                    "isBuyer"
-                )
-            ]
+        except BinanceAPIException as e:
 
-            if buys:
-
-                last_buy = buys[-1]
-
-                last_qty = float(
-                    last_buy.get(
-                        "qty",
-                        0
-                    )
-                )
-
-                last_price = float(
-                    last_buy.get(
-                        "price",
-                        0
-                    )
-                )
-
-                if (
-                    last_qty > 0
-                    and last_price > 0
-                ):
-
-                    recovered_entry = (
-                        last_price
-                    )
-
-        except Exception as e:
+            # Bazı paritelerde exact balance
+            # NOTIONAL / fee nedeniyle reddedilebilir.
+            print(
+                f"[BUY %100 HATASI] {symbol}: {e}"
+            )
 
             print(
-                "[POSITION SYNC] "
-                "Trade gecmisi okunamadi:",
-                e
+                "[BUY] %99.5 bakiye ile tekrar deneniyor..."
             )
 
-        position_open = True
+            fallback_amount = (
+                usdt_balance
+                * 0.995
+            )
 
-        position_symbol = symbol
+            order = binance.create_order(
+                symbol=symbol,
+                side="BUY",
+                type="MARKET",
+                quoteOrderQty=round(
+                    fallback_amount,
+                    2
+                )
+            )
 
-        position_quantity = qty
+        executed_qty = safe_float(
+            order.get("executedQty")
+        )
 
-        entry_price = recovered_entry
+        quote_qty = safe_float(
+            order.get("cummulativeQuoteQty")
+        )
 
-        print("================================")
+        if executed_qty <= 0:
+
+            print(
+                "[BUY] Emir gerceklestirilmedi."
+            )
+
+            return False
+
+        if quote_qty > 0:
+
+            entry_price = (
+                quote_qty
+                / executed_qty
+            )
+
+        else:
+
+            ticker = binance.get_symbol_ticker(
+                symbol=symbol
+            )
+
+            entry_price = safe_float(
+                ticker["price"]
+            )
+
+        position = {
+            "symbol": symbol,
+            "quantity": executed_qty,
+            "entry_price": entry_price,
+            "order_id": order.get("orderId"),
+            "time": time.time()
+        }
+
+        print()
+        print("✅ ALIM GERCEKLESTI")
+        print(f"PARITE: {symbol}")
+        print(f"MIKTAR: {executed_qty}")
+        print(f"GIRIS: {entry_price}")
         print(
-            "🔒 MEVCUT POZISYON BULUNDU"
+            f"TP: {entry_price * 1.10}"
         )
         print(
-            "PARITE:",
-            symbol
+            f"SL: {entry_price * 0.95}"
         )
-        print(
-            "MIKTAR:",
-            qty
-        )
-        print(
-            "GIRIS FIYATI:",
-            recovered_entry
-        )
-        print(
-            "TEKRAR BUY YAPILMAYACAK"
-        )
-        print("================================")
 
         return True
 
     except Exception as e:
 
         print(
-            "[POSITION SYNC HATASI]",
-            e
+            f"[BUY HATASI] {symbol}: {e}"
         )
 
         return False
 
 
 # =========================================================
-# BUY
-# =========================================================
-
-def buy_symbol(symbol):
-
-    global position_open
-    global position_symbol
-    global entry_price
-    global position_quantity
-
-    with buy_lock:
-
-        if position_open:
-
-            print(
-                "[BUY ENGEL] Zaten acik pozisyon var:",
-                position_symbol
-            )
-
-            return False
-
-        try:
-
-            usdt_balance = (
-                get_usdt_balance()
-            )
-
-            if usdt_balance <= 0:
-
-                print(
-                    "[BUY ENGEL] "
-                    "USDT bakiyesi yok."
-                )
-
-                return False
-
-            (
-                step_size,
-                min_qty,
-                min_notional,
-                max_notional
-            ) = get_symbol_rules(
-                symbol
-            )
-
-            # =================================================
-            # NOTIONAL KONTROLU
-            # =================================================
-
-            if (
-                min_notional > 0
-                and usdt_balance
-                < min_notional
-            ):
-
-                print(
-                    "[BUY ENGEL] "
-                    "MIN NOTIONAL:",
-                    min_notional
-                )
-
-                return False
-
-            if (
-                max_notional > 0
-                and usdt_balance
-                > max_notional
-            ):
-
-                print(
-                    "[BUY ENGEL] "
-                    "MAX NOTIONAL:",
-                    max_notional
-                )
-
-                return False
-
-            trade_amount = (
-                usdt_balance
-                * BALANCE_PERCENT
-                / 100.0
-            )
-
-            print("================================")
-            print(
-                "🟢 BUY DENENIYOR"
-            )
-            print(
-                "PARITE:",
-                symbol
-            )
-            print(
-                "SKORLU KAZANAN:",
-                symbol
-            )
-            print(
-                "USDT:",
-                trade_amount
-            )
-            print(
-                "BAKIYE KULLANIMI: %100"
-            )
-            print(
-                "MIN NOTIONAL:",
-                min_notional
-            )
-            print(
-                "MAX NOTIONAL:",
-                max_notional
-            )
-            print("================================")
-
-            quote_amount = round(
-                trade_amount,
-                2
-            )
-
-            try:
-
-                order = (
-                    binance.create_order(
-                        symbol=symbol,
-                        side="BUY",
-                        type="MARKET",
-                        quoteOrderQty=quote_amount
-                    )
-                )
-
-            except Exception as first_error:
-
-                error_text = str(
-                    first_error
-                ).lower()
-
-                # Tam bakiye fee/precision
-                # yuzunden reddedilirse.
-                if (
-                    "insufficient"
-                    in error_text
-                    or "balance"
-                    in error_text
-                ):
-
-                    fallback_amount = round(
-                        trade_amount
-                        * 0.995,
-                        2
-                    )
-
-                    print(
-                        "[BUY RETRY] "
-                        "Tam bakiye reddedildi. "
-                        "%99.5 deneniyor."
-                    )
-
-                    order = (
-                        binance.create_order(
-                            symbol=symbol,
-                            side="BUY",
-                            type="MARKET",
-                            quoteOrderQty=
-                                fallback_amount
-                        )
-                    )
-
-                else:
-
-                    raise
-
-            executed_qty = float(
-                order.get(
-                    "executedQty",
-                    0
-                )
-            )
-
-            spent = float(
-                order.get(
-                    "cummulativeQuoteQty",
-                    0
-                )
-            )
-
-            status = order.get(
-                "status",
-                "UNKNOWN"
-            )
-
-            if executed_qty <= 0:
-
-                print(
-                    "[BUY] Emir gerceklesmedi."
-                )
-
-                return False
-
-            if status not in (
-                "FILLED",
-                "PARTIALLY_FILLED"
-            ):
-
-                print(
-                    "[BUY] Emir durumu:",
-                    status
-                )
-
-                return False
-
-            if spent <= 0:
-
-                spent = quote_amount
-
-            entry_price = (
-                spent
-                / executed_qty
-            )
-
-            position_quantity = (
-                executed_qty
-            )
-
-            position_symbol = (
-                symbol
-            )
-
-            position_open = True
-
-            print("================================")
-            print(
-                "✅ TESTNET BUY GERCEKLESTI"
-            )
-            print(
-                "PARITE:",
-                symbol
-            )
-            print(
-                "MIKTAR:",
-                executed_qty
-            )
-            print(
-                "GIRIS FIYATI:",
-                entry_price
-            )
-            print(
-                "HARCANAN USDT:",
-                spent
-            )
-            print(
-                "STATUS:",
-                status
-            )
-            print("================================")
-
-            return True
-
-        except Exception as e:
-
-            print(
-                "[BUY HATASI]",
-                symbol,
-                e
-            )
-
-            return False
-
-
-# =========================================================
-# SELL
+# SATIŞ
 # =========================================================
 
 def sell_position(reason):
 
-    global position_open
-    global position_symbol
-    global entry_price
-    global position_quantity
+    global position
 
-    if (
-        not position_open
-        or not position_symbol
-    ):
-
+    if not position:
         return False
 
-    symbol = position_symbol
+    symbol = position["symbol"]
+
+    quantity = position["quantity"]
 
     try:
 
-        (
-            step_size,
-            min_qty,
-            min_notional,
-            max_notional
-        ) = get_symbol_rules(
-            symbol
-        )
-
         quantity = round_quantity(
-            position_quantity,
-            step_size
+            symbol,
+            quantity
         )
 
         if quantity <= 0:
 
             print(
-                "[SELL] Miktar 0."
+                "[SELL] Gecerli miktar yok."
             )
 
             return False
 
-        if quantity < min_qty:
-
-            print(
-                "[SELL] "
-                "Minimum miktarin altinda."
-            )
-
-            return False
-
-        print("================================")
+        print()
         print("🔴 SELL")
-        print(
-            "PARITE:",
-            symbol
-        )
-        print(
-            "SEBEP:",
-            reason
-        )
-        print(
-            "MIKTAR:",
-            quantity
-        )
-        print("================================")
+        print(f"PARITE: {symbol}")
+        print(f"MIKTAR: {quantity}")
+        print(f"NEDEN: {reason}")
 
-        order = (
-            binance.create_order(
-                symbol=symbol,
-                side="SELL",
-                type="MARKET",
-                quantity=quantity
+        order = binance.create_order(
+            symbol=symbol,
+            side="SELL",
+            type="MARKET",
+            quantity=quantity
+        )
+
+        executed_qty = safe_float(
+            order.get("executedQty")
+        )
+
+        quote_qty = safe_float(
+            order.get("cummulativeQuoteQty")
+        )
+
+        if executed_qty > 0 and quote_qty > 0:
+
+            sell_price = (
+                quote_qty
+                / executed_qty
             )
-        )
 
-        print("================================")
-        print(
-            "✅ TESTNET SELL GERCEKLESTI"
-        )
-        print(
-            "PARITE:",
-            symbol
-        )
-        print(
-            "SEBEP:",
-            reason
-        )
-        print(
-            "STATUS:",
-            order.get(
-                "status"
+        else:
+
+            ticker = binance.get_symbol_ticker(
+                symbol=symbol
             )
+
+            sell_price = safe_float(
+                ticker["price"]
+            )
+
+        entry = position["entry_price"]
+
+        pnl_percent = (
+            (sell_price - entry)
+            / entry
+        ) * 100
+
+        print()
+        print("✅ SATIS GERCEKLESTI")
+        print(f"PARITE: {symbol}")
+        print(f"GIRIS: {entry}")
+        print(f"CIKIS: {sell_price}")
+        print(
+            f"P/L: {pnl_percent:.2f}%"
         )
-        print("================================")
 
-        position_open = False
-
-        position_symbol = None
-
-        entry_price = 0.0
-
-        position_quantity = 0.0
+        position = None
 
         return True
 
     except Exception as e:
 
         print(
-            "[SELL HATASI]",
-            symbol,
-            e
+            f"[SELL HATASI] {symbol}: {e}"
         )
 
         return False
 
 
 # =========================================================
-# POZISYON IZLE
+# POZİSYON TAKİBİ
 # =========================================================
 
 def monitor_position():
 
-    if (
-        not position_open
-        or not position_symbol
-        or entry_price <= 0
-    ):
+    global position
 
+    if not position:
         return
+
+    symbol = position["symbol"]
+
+    entry = position["entry_price"]
 
     try:
 
-        ticker = (
-            binance.get_symbol_ticker(
-                symbol=position_symbol
-            )
+        ticker = binance.get_symbol_ticker(
+            symbol=symbol
         )
 
-        current_price = float(
+        current_price = safe_float(
             ticker["price"]
         )
 
-        change = (
-            (
-                current_price
-                - entry_price
-            )
-            / entry_price
+        if current_price <= 0:
+            return
+
+        pnl_percent = (
+            (current_price - entry)
+            / entry
         ) * 100
 
         print(
-            f"[POSITION] "
-            f"{position_symbol} | "
-            f"Giris: {entry_price:.8f} | "
-            f"Fiyat: {current_price:.8f} | "
-            f"P/L: {change:.2f}%"
+            f"[POSITION] {symbol} "
+            f"| GIRIS {entry:.8f} "
+            f"| SIMDI {current_price:.8f} "
+            f"| P/L {pnl_percent:.2f}%"
         )
 
-        if (
-            change
-            >= TAKE_PROFIT_PERCENT
-        ):
+        # TAKE PROFIT
+        if pnl_percent >= TAKE_PROFIT_PERCENT:
 
-            sell_position(
-                "TAKE PROFIT %10"
+            print(
+                "🎯 TAKE PROFIT"
             )
 
-        elif (
-            change
-            <= -STOP_LOSS_PERCENT
-        ):
+            sell_position(
+                "TAKE PROFIT +10%"
+            )
+
+            return
+
+        # STOP LOSS
+        if pnl_percent <= -STOP_LOSS_PERCENT:
+
+            print(
+                "🛑 STOP LOSS"
+            )
 
             sell_position(
-                "STOP LOSS %5"
+                "STOP LOSS -5%"
             )
+
+            return
 
     except Exception as e:
 
@@ -1636,24 +997,34 @@ def monitor_position():
 
 
 # =========================================================
-# SON KAPANAN 15M MUM
+# SON KAPANMIŞ MUM
 # =========================================================
 
 def get_latest_closed_candle_time():
 
-    candles = (
-        binance.get_klines(
+    try:
+
+        candles = binance.get_klines(
             symbol="BTCUSDT",
             interval=TIMEFRAME,
             limit=3
         )
-    )
 
-    if len(candles) < 2:
+        if len(candles) < 2:
+            return None
+
+        # Son mum halen açık olabilir.
+        # Ondan önceki kapanmış mum.
+        return candles[-2][0]
+
+    except Exception as e:
+
+        print(
+            "[CANDLE ERROR]",
+            e
+        )
 
         return None
-
-    return candles[-2][0]
 
 
 # =========================================================
@@ -1662,85 +1033,63 @@ def get_latest_closed_candle_time():
 
 def auto_trader():
 
-    global last_scanned_candle
+    global last_closed_candle
+    global trader_running
 
-    print("================================")
-    print(
-        "🤖 AUTOTRADER BASLADI"
-    )
-    print("================================")
+    if not binance:
 
-    print(
-        "MUM: 15 DAKIKA"
-    )
+        print(
+            "[AUTOTRADER] Binance baglantisi yok."
+        )
 
-    print(
-        "PARITELER: TUM AKTIF USDT SPOT"
-    )
+        return
 
-    print(
-        "BAKIYE: %100"
-    )
+    if trader_running:
 
-    print(
-        "TAKE PROFIT: %10"
-    )
+        print(
+            "[AUTOTRADER] Zaten calisiyor."
+        )
 
-    print(
-        "STOP LOSS: %5"
-    )
+        return
 
-    print(
-        "STRATEJI: "
-        "EMA + RSI + MOMENTUM + "
-        "HACIM + BREAKOUT"
-    )
+    trader_running = True
 
-    print(
-        "MIN SCORE:",
-        MIN_SCORE
-    )
+    print()
+    print("=" * 60)
+    print("AUTOTRADER BASLADI")
+    print("MUM: 15 DAKIKA")
+    print("PARITE: AKTIF USDT SPOT")
+    print("BAKIYE: %100")
+    print("TAKE PROFIT: +10%")
+    print("STOP LOSS: -5%")
+    print("POZISYON: AYNI ANDA 1")
+    print("=" * 60)
 
-    print(
-        "BINANCE: TESTNET"
-    )
-
-    print("================================")
-
-    symbols = get_usdt_symbols()
-
-    # Restart sonrasi mevcut coin varsa
-    # yeni BUY yapma.
-    find_existing_position(
-        symbols
-    )
+    # İlk açılışta pariteleri al
+    get_usdt_symbols()
 
     while True:
 
         try:
 
-            if binance is None:
-
-                time.sleep(
-                    SCAN_INTERVAL
-                )
-
-                continue
-
-            # Pozisyon varsa tarama yapma.
-            if position_open:
+            # Pozisyon açıksa
+            # yeni tarama yapma
+            if position:
 
                 monitor_position()
 
-                time.sleep(10)
+                time.sleep(
+                    SCAN_INTERVAL
+                )
 
                 continue
 
-            candle_time = (
+            # Son kapanmış mum
+            closed_candle = (
                 get_latest_closed_candle_time()
             )
 
-            if candle_time is None:
+            if closed_candle is None:
 
                 time.sleep(
                     SCAN_INTERVAL
@@ -1748,10 +1097,10 @@ def auto_trader():
 
                 continue
 
-            # Ayni mumu tekrar tarama.
+            # Aynı mumda ikinci kez tarama yapma
             if (
-                last_scanned_candle
-                == candle_time
+                last_closed_candle
+                == closed_candle
             ):
 
                 time.sleep(
@@ -1760,252 +1109,139 @@ def auto_trader():
 
                 continue
 
-            last_scanned_candle = (
-                candle_time
+            # Yeni mum
+            last_closed_candle = (
+                closed_candle
             )
 
-            print("================================")
-
+            print()
             print(
-                "[NEW CANDLE] "
-                "Yeni 15 dakikalik mum kapandi."
+                "[NEW CANDLE] Yeni 15 dakikalik "
+                "mum kapandi."
             )
 
-            print(
-                f"[SCAN] "
-                f"{len(symbols)} parite "
-                f"taramasi basliyor..."
-            )
+            # Pariteleri güncelle
+            get_usdt_symbols()
 
-            print("================================")
+            # 487+ pariteyi tara
+            best = find_best_symbol()
 
-            # =================================================
-            # USDT BAKIYESI
-            # =================================================
-
-            usdt_balance = (
-                get_usdt_balance()
-            )
-
-            print(
-                "[BALANCE] USDT:",
-                usdt_balance
-            )
-
-            if usdt_balance <= 0:
+            if not best:
 
                 print(
-                    "[NO TRADE] "
-                    "USDT bakiyesi yok."
-                )
-
-                time.sleep(
-                    SCAN_INTERVAL
+                    "[TRADE] Bu mumda islem yok."
                 )
 
                 continue
 
-            # =================================================
-            # 487+ PARITE TARA
-            # =================================================
-
-            best = find_best_symbol(
-                symbols,
-                usdt_balance
+            print()
+            print("🏆 TRADE ADAYI")
+            print(
+                f"PARITE: {best['symbol']}"
+            )
+            print(
+                f"SKOR: {best['score']}"
             )
 
-            if best is None:
-
-                print(
-                    "[NO TRADE] "
-                    "Bu mumda uygun parite yok."
-                )
-
-                time.sleep(
-                    SCAN_INTERVAL
-                )
-
-                continue
-
-            # =================================================
-            # SON POZISYON KONTROLU
-            # =================================================
-
-            if find_existing_position(
-                symbols
-            ):
-
-                print(
-                    "[NO TRADE] "
-                    "Hesapta zaten pozisyon var."
-                )
-
-                time.sleep(
-                    SCAN_INTERVAL
-                )
-
-                continue
-
-            # =================================================
-            # TRADE ADAYI
-            # =================================================
-
-            print("================================")
-
-            print(
-                "🏆 TRADE ADAYI"
-            )
-
-            print(
-                "PARITE:",
+            # Alım
+            success = buy_symbol(
                 best["symbol"]
             )
 
-            print(
-                "SKOR:",
-                best["score"]
-            )
+            if not success:
 
-            print("================================")
-
-            # =================================================
-            # SADECE EN YUKSEK SKORLU PARITE
-            # =================================================
-
-            buy_symbol(
-                best["symbol"]
-            )
-
-            time.sleep(
-                SCAN_INTERVAL
-            )
+                print(
+                    "[TRADE] ALIM YAPILAMADI."
+                )
 
         except Exception as e:
 
             print(
-                "AUTOTRADER GENEL HATA:",
+                "[AUTOTRADER ERROR]",
                 e
             )
 
-            time.sleep(60)
+            time.sleep(10)
 
 
 # =========================================================
-# AUTOTRADER THREAD
+# TELEGRAM
 # =========================================================
 
-if binance:
-
-    threading.Thread(
-        target=auto_trader,
-        daemon=True
-    ).start()
-
-
-# =========================================================
-# MINI APP
-# =========================================================
-
-@app.route("/")
-def home():
-
-    return render_template(
-        "index.html"
-    )
-
-
-# =========================================================
-# TELEGRAM START
-# =========================================================
-
-async def start(
+async def start_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
 
     user = update.effective_user
 
-    if supabase:
-
-        try:
-
-            supabase.table(
-                "users"
-            ).upsert(
-                {
-                    "telegram_id":
-                        user.id,
-
-                    "first_name":
-                        user.first_name,
-
-                    "last_name":
-                        user.last_name,
-                },
-                on_conflict=
-                    "telegram_id"
-            ).execute()
-
-        except Exception as e:
-
-            print(
-                "SUPABASE START HATASI:",
-                e
-            )
-
-    await update.message.reply_text(
-        "🤖 RaTrade Bot'a hoş geldin!\n\n"
-        "Mini App'e giriş yapabilirsin. 🚀"
-    )
-
-
-# =========================================================
-# TELEGRAM BOT
-# =========================================================
-
-def run_bot():
-
-    token = os.getenv(
-        "TELEGRAM_BOT_TOKEN"
-    )
-
-    if not token:
+    if user:
 
         print(
-            "TELEGRAM_BOT_TOKEN bulunamadı!"
+            f"[TELEGRAM] /start "
+            f"{user.id} "
+            f"{user.first_name}"
+        )
+
+    await update.message.reply_text(
+        "🚀 RA Trade aktif."
+    )
+
+
+def run_telegram():
+
+    if not TELEGRAM_BOT_TOKEN:
+
+        print(
+            "[TELEGRAM] Token bulunamadi."
         )
 
         return
 
     try:
 
-        bot = (
-            ApplicationBuilder()
-            .token(token)
+        application = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
             .build()
         )
 
-        bot.add_handler(
+        application.add_handler(
             CommandHandler(
                 "start",
-                start
+                start_command
             )
         )
 
-        bot.run_polling(
-            stop_signals=None,
+        print(
+            "[TELEGRAM] Bot baslatiliyor..."
+        )
+
+        application.run_polling(
             drop_pending_updates=True
         )
 
     except Exception as e:
 
         print(
-            "TELEGRAM BOT HATASI:",
+            "[TELEGRAM ERROR]",
             e
         )
 
 
-threading.Thread(
-    target=run_bot,
-    daemon=True
-).start()
+# =========================================================
+# BAŞLAT
+# =========================================================
+
+if __name__ == "__main__":
+
+    # AutoTrader ayrı thread
+    trader_thread = threading.Thread(
+        target=auto_trader,
+        daemon=True
+    )
+
+    trader_thread.start()
+
+    # Telegram
+    run_telegram()
