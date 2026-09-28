@@ -2,10 +2,17 @@ import os
 import threading
 
 from flask import Flask, render_template
+from supabase import create_client
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 app = Flask(__name__)
+
+# Supabase bağlantısı
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 @app.route("/")
@@ -14,9 +21,26 @@ def home():
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    # Kullanıcıyı veritabanına ekle / mevcut kullanıcıyı bul
+    result = (
+        supabase
+        .table("users")
+        .upsert(
+            {
+                "telegram_id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            },
+            on_conflict="telegram_id",
+        )
+        .execute()
+    )
+
     await update.message.reply_text(
-        "🤖 AutoTrade Bot'a hoş geldin!\n\n"
-        "Mini App hazırlanıyor..."
+        "🤖 RaTrade Bot'a hoş geldin!\n\n"
+        "Mini App'e giriş yapabilirsin. 🚀"
     )
 
 
