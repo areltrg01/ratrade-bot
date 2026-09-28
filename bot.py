@@ -139,7 +139,163 @@ else:
 # =========================================================
 # AYARLAR
 # =========================================================
+# =========================================================
+# BSC USDT DEPOSIT MONITOR
+# =========================================================
 
+TRANSFER_EVENT = Web3.keccak(
+    text="Transfer(address,address,uint256)"
+).hex()
+
+
+def monitor_bsc_deposits():
+
+    try:
+
+        bsc = Web3(
+            Web3.HTTPProvider(
+                BSC_RPC_URL,
+                request_kwargs={"timeout": 15}
+            )
+        )
+
+        if not bsc.is_connected():
+
+            print("❌ BSC MAINNET BAGLANTISI YOK")
+
+            return
+
+        print("================================")
+        print("✅ BSC MAINNET BAGLANTISI OK")
+        print("CHAIN ID:", bsc.eth.chain_id)
+        print("DEPOSIT:", DEPOSIT_ADDRESS)
+        print("================================")
+
+        deposit_address = Web3.to_checksum_address(
+            DEPOSIT_ADDRESS
+        )
+
+        usdt_address = Web3.to_checksum_address(
+            USDT_CONTRACT
+        )
+
+        # Deposit adresinin topic değeri
+        deposit_topic = Web3.to_hex(
+            Web3.to_bytes(
+                hexstr=deposit_address
+            ).rjust(
+                32,
+                b"\x00"
+            )
+        )
+
+        # İlk çalışmada son 20 bloğu kontrol et
+        last_block = max(
+            0,
+            bsc.eth.block_number - 20
+        )
+
+        print("🔎 BSC DEPOSIT MONITOR BASLADI")
+        print("BASLANGIC BLOCK:", last_block)
+
+        while True:
+
+            try:
+
+                current_block = bsc.eth.block_number
+
+                if current_block > last_block:
+
+                    logs = bsc.eth.get_logs({
+
+                        "fromBlock":
+                            last_block + 1,
+
+                        "toBlock":
+                            current_block,
+
+                        "address":
+                            usdt_address,
+
+                        "topics": [
+
+                            TRANSFER_EVENT,
+
+                            None,
+
+                            deposit_topic
+
+                        ]
+
+                    })
+
+                    for log in logs:
+
+                        tx_hash = (
+                            log["transactionHash"].hex()
+                        )
+
+                        from_address = (
+                            Web3.to_checksum_address(
+                                "0x"
+                                + log["topics"][1].hex()[-40:]
+                            )
+                        )
+
+                        amount_raw = int(
+                            log["data"].hex(),
+                            16
+                        )
+
+                        amount_usdt = (
+                            amount_raw / 10**18
+                        )
+
+                        print("")
+                        print("================================")
+                        print("💰 YENI USDT DEPOSIT")
+                        print("================================")
+                        print("TX:", tx_hash)
+                        print("FROM:", from_address)
+                        print("TO:", deposit_address)
+                        print(
+                            "AMOUNT:",
+                            amount_usdt,
+                            "USDT"
+                        )
+                        print(
+                            "BLOCK:",
+                            log["blockNumber"]
+                        )
+                        print("================================")
+                        print("")
+
+                    last_block = current_block
+
+                time.sleep(10)
+
+            except Exception as e:
+
+                print(
+                    "⚠️ BSC DEPOSIT MONITOR HATASI:",
+                    e
+                )
+
+                time.sleep(15)
+
+    except Exception as e:
+
+        print(
+            "❌ BSC MONITOR BASLATILAMADI:",
+            e
+        )
+
+
+# Deposit monitor ayrı thread
+threading.Thread(
+    target=monitor_bsc_deposits,
+    daemon=True
+).start()
 TIMEFRAME = Client.KLINE_INTERVAL_15MINUTE
 
 KLINE_LIMIT = 100
