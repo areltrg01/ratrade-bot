@@ -152,6 +152,7 @@ symbols = []
 last_scanned_candle = None
 
 position = None
+trade_candidates = []
 
 trader_started = False
 
@@ -965,6 +966,8 @@ def find_best_symbol():
 
         return None
 
+    global trade_candidates
+    trade_candidates = results[:10]
     return best
 
 
@@ -1120,196 +1123,107 @@ def round_quantity(
 # =========================================================
 
 def buy_symbol(symbol):
+    """
+    BUY with Binance NOTIONAL-aware sizing.
 
+    Important:
+    - If maxNotional applies to MARKET orders, a single order cannot exceed it.
+    - We do NOT create hundreds/thousands of tiny orders just to force 100%.
+    - If the symbol cannot accept the intended trade size, return False so the
+      caller can try another top-ranked symbol.
+    """
     global position
 
     try:
-
         balance = get_usdt_balance()
-
         if balance <= 0:
             print("[BUY] USDT yok.")
             return False
 
         filters = get_symbol_filters(symbol)
 
-        # Binance NOTIONAL filtresi hem minimum hem maksimum
-        # emir degerini kontrol edebilir. Eski kod sadece minimumu
-        # okuyordu; 10.000 USDT gibi bakiyelerde maxNotional asilirsa
-        # -1013 NOTIONAL hatasi olusur. Bu nedenle emri gerekiyorsa
-        # otomatik parcaliyoruz.
-        notional_filter = (
-            filters.get("NOTIONAL")
-            or filters.get("MIN_NOTIONAL")
-        )
-
+        notional_filter = filters.get("NOTIONAL")
         min_notional = 0.0
         max_notional = 0.0
+        apply_min_market = True
+        apply_max_market = False
 
         if notional_filter:
-            min_notional = f(
-                notional_filter.get("minNotional")
-            )
-            max_notional = f(
-                notional_filter.get("maxNotional")
-            )
+            min_notional = f(notional_filter.get("minNotional"))
+            max_notional = f(notional_filter.get("maxNotional"))
+            apply_min_market = bool(notional_filter.get("applyMinToMarket", True))
+            apply_max_market = bool(notional_filter.get("applyMaxToMarket", False))
+        else:
+            min_filter = filters.get("MIN_NOTIONAL")
+            if min_filter:
+                min_notional = f(min_filter.get("minNotional"))
+                apply_min_market = bool(min_filter.get("applyToMarket", True))
 
-        # USDT bakiye ile pratik olarak kullanilabilir hedef.
-        # Tam bakiyeyi zorlamak komisyon/yuvarlama nedeniyle son emirde
-        # yetersiz bakiye yaratabilir; cok kucuk bir pay birakiyoruz.
-        amount = balance * (BALANCE_PERCENT / 100.0)
-        target_amount = amount * 0.9995
+        target = balance * (BALANCE_PERCENT / 100.0) * 0.9995
 
+        # For MARKET orders, maxNotional matters only when Binance explicitly
+        # says to apply it to MARKET orders.
+        if apply_max_market and max_notional > 0 and target > max_notional * 0.995:
+            print(
+                f"[BUY] {symbol} uygun degil: MARKET maxNotional "
+                f"{max_notional} USDT, hedef {target:.8f} USDT."
+            )
+            return False
+
+        amount = target
+        if apply_max_market and max_notional > 0:
+            amount = min(amount, max_notional * 0.995)
+
+        if apply_min_market and min_notional > 0 and amount < min_notional:
+            print(
+                f"[BUY] {symbol} uygun degil: emir {amount:.8f} USDT, "
+                f"minNotional {min_notional} USDT."
+            )
+            return False
+
+        # quoteOrderQty is the cleanest way to buy with a USDT budget:
+        # Binance determines the base quantity at market execution.
         print()
         print("================================")
         print("🟢 BUY DENENIYOR")
         print("PARITE:", symbol)
         print("USDT BAKIYE:", balance)
-        print("HEDEF USDT:", target_amount)
+        print("HEDEF USDT:", amount)
         print("MIN NOTIONAL:", min_notional)
         print("MAX NOTIONAL:", max_notional)
+        print("MAX MARKET UYGULANIYOR:", apply_max_market)
         print("================================")
 
-        # Binance sembol bilgisinden quote hassasiyetini al.
-        symbol_info = binance.get_symbol_info(symbol) or {}
-        quote_precision = int(
-            symbol_info.get("quoteAssetPrecision", 2) or 2
-        )
-        quote_precision = max(0, min(quote_precision, 8))
-        quote_step = Decimal("1").scaleb(-quote_precision)
-
-        def quote_round(value):
-            q = Decimal(str(value)).quantize(
-                quote_step,
-                rounding=ROUND_DOWN
-            )
-            return float(q)
-
-        # NOTIONAL maksimumu varsa, tek emirde onu asma.
-        # Birden fazla MARKET BUY ile toplamda hedef bakiyeye kadar
-        # otomatik alis yapilir. Boylece maxNotional filtresi asılmaz.
-        if max_notional > 0:
-            safe_max = max_notional * 0.995
-        else:
-            safe_max = target_amount
-
-        if min_notional > 0 and safe_max < min_notional:
-            print(
-                "[BUY] NOTIONAL limitleri arasinda kullanilabilir emir araligi yok."
-            )
-            return False
-
-        # Kac parcaya bolunecegini belirle.
-        chunks = max(
-            1,
-            int((target_amount / safe_max) + 0.999999)
+        order = binance.create_order(
+            symbol=symbol,
+            side="BUY",
+            type="MARKET",
+            quoteOrderQty=round(amount, 8)
         )
 
-        # Her parcayi esit bolerek son parcayi min notional altina
-        # dusurme riskini azalt.
-        chunk_amount = target_amount / chunks
+        executed = f(order.get("executedQty"))
+        spent = f(order.get("cummulativeQuoteQty"))
 
-        if min_notional > 0 and chunk_amount < min_notional:
-            # Parca sayisi fazla olduysa tekrar ayarla.
-            chunks = max(
-                1,
-                int(target_amount / min_notional)
-            )
-            chunk_amount = target_amount / chunks
-
-        total_executed = 0.0
-        total_spent = 0.0
-        order_ids = []
-
-        for i in range(chunks):
-
-            remaining = target_amount - total_spent
-
-            if remaining <= 0:
-                break
-
-            this_amount = min(
-                chunk_amount,
-                remaining,
-                safe_max
-            )
-
-            this_amount = quote_round(this_amount)
-
-            if this_amount <= 0:
-                break
-
-            # Son parca min notional altina dusuyorsa onceki emre
-            # birakmak yerine bakiye dahilinde kalan miktari kullan.
-            if min_notional > 0 and this_amount < min_notional:
-                print(
-                    f"[BUY] Son parca {this_amount} USDT, "
-                    f"minNotional {min_notional} altinda. Durduruluyor."
-                )
-                break
-
-            print(
-                f"[BUY {i + 1}/{chunks}] "
-                f"quoteOrderQty={this_amount} USDT"
-            )
-
-            try:
-                order = binance.create_order(
-                    symbol=symbol,
-                    side="BUY",
-                    type="MARKET",
-                    quoteOrderQty=this_amount
-                )
-            except Exception as order_error:
-                print(
-                    f"[BUY PARCA HATASI] {symbol} "
-                    f"{i + 1}/{chunks}: {order_error}"
-                )
-                break
-
-            executed = f(order.get("executedQty"))
-            spent = f(order.get("cummulativeQuoteQty"))
-
-            if executed <= 0 or spent <= 0:
-                print("[BUY] Emir gerceklesmedi veya harcama 0.")
-                break
-
-            total_executed += executed
-            total_spent += spent
-
-            if order.get("orderId") is not None:
-                order_ids.append(order.get("orderId"))
-
-            print(
-                f"[BUY OK] {i + 1}/{chunks} | "
-                f"harcanan={spent} | miktar={executed}"
-            )
-
-            # Kalan USDT komisyon/yuvarlama nedeniyle cok azsa dur.
-            if target_amount - total_spent < max(0.01, min_notional * 0.01):
-                break
-
-        if total_executed <= 0 or total_spent <= 0:
-            print("[BUY] Hicbir parca basarili olmadi.")
+        if executed <= 0 or spent <= 0:
+            print("[BUY] Emir gerceklesmedi veya harcama 0.")
             return False
 
-        entry = total_spent / total_executed
+        entry = spent / executed
 
         position = {
             "symbol": symbol,
-            "quantity": total_executed,
+            "quantity": executed,
             "entry_price": entry,
-            "order_id": order_ids[-1] if order_ids else None
+            "order_id": order.get("orderId")
         }
 
         print()
         print("================================")
         print("✅ BUY BASARILI")
         print("PARITE:", symbol)
-        print("TOPLAM MIKTAR:", total_executed)
-        print("TOPLAM HARCANAN USDT:", total_spent)
+        print("MIKTAR:", executed)
+        print("HARCANAN USDT:", spent)
         print("GIRIS:", entry)
-        print("PARCA SAYISI:", len(order_ids))
         print("TAKE PROFIT:", f"{entry * 1.10:.8f}")
         print("STOP LOSS:", f"{entry * 0.95:.8f}")
         print("================================")
@@ -1675,11 +1589,27 @@ def auto_trader():
                 "=========================================="
             )
 
-            # SADECE EN YÜKSEK SKORLU
-            # TEK PARİTE.
-            buy_symbol(
-                best["symbol"]
-            )
+            # En yüksek skordan başlayarak uygun sembolü dene.
+            # NOTIONAL filtresi nedeniyle bir sembol hesabın hedef bakiyesini
+            # MARKET emrinde kabul etmiyorsa sonraki TOP adayına geç.
+            bought = False
+
+            for candidate in trade_candidates:
+                if position:
+                    bought = True
+                    break
+
+                print(
+                    f"[BUY ADAYI] {candidate['symbol']} | "
+                    f"SKOR {candidate['score']}"
+                )
+
+                if buy_symbol(candidate["symbol"]):
+                    bought = True
+                    break
+
+            if not bought:
+                print("[NO TRADE] TOP adaylar icinde uygun BUY bulunamadi.")
 
         except Exception as e:
 
