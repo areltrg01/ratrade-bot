@@ -44,7 +44,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # BSC MAINNET DEPOSIT
 # =========================================================
 
-BSC_RPC_URL = "https://bsc-dataseed.bnbchain.org"
+BSC_RPC_URL = "https://bsc-rpc.publicnode.com"
 BSC_CHAIN_ID = 56
 
 DEPOSIT_ADDRESS = "0x41808d5b2Db66f76797aa1F7FB6b481f9454342f"
@@ -204,12 +204,14 @@ def monitor_bsc_deposits():
 
                 current_block = bsc.eth.block_number
 
-                scan_to = min(
-                    current_block,
-                    last_block + 5
-                )
+                # BSC RPC sağlayıcılarının eth_getLogs limitine takılmamak için
+                # her isteği küçük blok parçaları halinde tarıyoruz.
+                while last_block < current_block:
 
-                if scan_to > last_block:
+                    scan_to = min(
+                        current_block,
+                        last_block + 5
+                    )
 
                     logs = bsc.eth.get_logs({
 
@@ -277,7 +279,7 @@ def monitor_bsc_deposits():
 
                     last_block = scan_to
 
-                time.sleep(10)
+                time.sleep(5)
 
             except Exception as e:
 
@@ -286,7 +288,7 @@ def monitor_bsc_deposits():
                     e
                 )
 
-                time.sleep(15)
+                time.sleep(10)
 
     except Exception as e:
 
