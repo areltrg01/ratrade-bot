@@ -31,7 +31,21 @@
             padding-bottom: 100px;
         }
 
-        /* TOP */
+        /* =========================
+           SAYFALAR
+        ========================= */
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* =========================
+           ÜST
+        ========================= */
 
         .top {
             padding: 22px 20px 10px;
@@ -58,17 +72,9 @@
             font-size: 12px;
         }
 
-        /* SAYFALAR */
-
-        .page {
-            display: none;
-        }
-
-        .page.active {
-            display: block;
-        }
-
-        /* BALANCE */
+        /* =========================
+           BAKİYE
+        ========================= */
 
         .balance {
             margin: 18px 18px 12px;
@@ -115,7 +121,9 @@
             font-size: 13px;
         }
 
-        /* SECTION */
+        /* =========================
+           SECTION
+        ========================= */
 
         .section {
             padding: 10px 18px;
@@ -127,7 +135,9 @@
             margin-bottom: 12px;
         }
 
-        /* TRADE */
+        /* =========================
+           TRADE
+        ========================= */
 
         .trade {
             background: #101722;
@@ -228,7 +238,9 @@
             font-size: 15px;
         }
 
-        /* STATS */
+        /* =========================
+           STATS
+        ========================= */
 
         .stats {
             display: grid;
@@ -259,13 +271,9 @@
 
         .countdown {
             margin-top: 10px;
-
             text-align: center;
-
             padding: 17px;
-
             border-radius: 18px;
-
             background: #101722;
         }
 
@@ -276,12 +284,13 @@
 
         .time {
             margin-top: 7px;
-
             font-size: 20px;
             font-weight: 800;
         }
 
-        /* PROFILE */
+        /* =========================
+           PROFİL
+        ========================= */
 
         .profile-card {
             margin: 18px;
@@ -361,7 +370,186 @@
             font-weight: 600;
         }
 
-        /* BOTTOM NAV */
+        /* =========================
+           CÜZDAN
+        ========================= */
+
+        .wallet-card {
+            margin: 18px;
+
+            padding: 24px 20px;
+
+            border-radius: 24px;
+
+            background:
+                radial-gradient(
+                    circle at top right,
+                    rgba(54,224,160,.18),
+                    transparent 45%
+                ),
+                linear-gradient(
+                    145deg,
+                    #111827,
+                    #0c1220
+                );
+
+            border: 1px solid rgba(255,255,255,.07);
+
+            box-shadow:
+                0 15px 40px rgba(0,0,0,.25);
+        }
+
+        .wallet-label {
+            color: #8993a5;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .wallet-balance {
+            font-size: 36px;
+            font-weight: 800;
+        }
+
+        .wallet-balance span {
+            color: #36e0a0;
+            font-size: 19px;
+        }
+
+        .wallet-address-box {
+            margin-top: 20px;
+            padding: 14px;
+
+            background: #0a101b;
+
+            border-radius: 14px;
+
+            border: 1px solid rgba(255,255,255,.05);
+        }
+
+        .wallet-address-title {
+            color: #8993a5;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .wallet-network {
+            color: #36e0a0;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .wallet-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .wallet-button {
+            border: none;
+
+            padding: 15px;
+
+            border-radius: 15px;
+
+            font-size: 14px;
+            font-weight: 800;
+
+            cursor: pointer;
+        }
+
+        .deposit-button {
+            background: #182333;
+            color: #36e0a0;
+
+            border: 1px solid rgba(54,224,160,.25);
+        }
+
+        .withdraw-button {
+            background:
+                linear-gradient(
+                    135deg,
+                    #36e0a0,
+                    #19b87c
+                );
+
+            color: #06110c;
+        }
+
+        /* =========================
+           İŞLEM KARTLARI
+        ========================= */
+
+        .transaction {
+            display: flex;
+
+            align-items: center;
+
+            gap: 12px;
+
+            background: #101722;
+
+            border: 1px solid rgba(255,255,255,.05);
+
+            padding: 15px;
+
+            border-radius: 17px;
+
+            margin-bottom: 10px;
+        }
+
+        .transaction-icon {
+            width: 42px;
+            height: 42px;
+
+            border-radius: 50%;
+
+            display: flex;
+
+            align-items: center;
+            justify-content: center;
+
+            background: #182333;
+
+            font-size: 20px;
+        }
+
+        .transaction-info {
+            flex: 1;
+        }
+
+        .transaction-title {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .transaction-date {
+            margin-top: 4px;
+            color: #707b8f;
+            font-size: 11px;
+        }
+
+        .transaction-amount {
+            font-size: 14px;
+            font-weight: 800;
+            color: #36e0a0;
+        }
+
+        .empty {
+            text-align: center;
+
+            padding: 35px 20px;
+
+            color: #707b8f;
+
+            background: #101722;
+
+            border-radius: 18px;
+        }
+
+        /* =========================
+           ALT MENÜ
+        ========================= */
 
         .nav {
             position: fixed;
@@ -426,9 +614,10 @@
 
 <div class="app">
 
-    <!-- ================================= -->
-    <!-- ANA SAYFA -->
-    <!-- ================================= -->
+
+    <!-- =================================
+         ANA SAYFA
+    ================================= -->
 
     <div id="homePage" class="page active">
 
@@ -443,6 +632,7 @@
             </div>
 
         </div>
+
 
         <div class="balance">
 
@@ -459,6 +649,7 @@
             </div>
 
         </div>
+
 
         <div class="section">
 
@@ -492,6 +683,7 @@
 
                 </div>
 
+
                 <div class="chart">
 
                     <svg
@@ -521,6 +713,7 @@
 
                 </div>
 
+
                 <button class="trade-button">
                     🚀 Trade Sistemini Aç
                 </button>
@@ -528,6 +721,7 @@
             </div>
 
         </div>
+
 
         <div class="section">
 
@@ -549,6 +743,7 @@
 
                 </div>
 
+
                 <div class="stat">
 
                     <div class="stat-label">
@@ -561,6 +756,7 @@
 
                 </div>
 
+
                 <div class="stat">
 
                     <div class="stat-label">
@@ -572,6 +768,7 @@
                     </div>
 
                 </div>
+
 
                 <div class="stat">
 
@@ -590,6 +787,7 @@
 
             </div>
 
+
             <div class="countdown">
 
                 <div class="countdown-title">
@@ -607,9 +805,9 @@
     </div>
 
 
-    <!-- ================================= -->
-    <!-- PROFİL -->
-    <!-- ================================= -->
+    <!-- =================================
+         PROFİL
+    ================================= -->
 
     <div id="profilePage" class="page">
 
@@ -625,6 +823,7 @@
 
         </div>
 
+
         <div class="profile-card">
 
             <img
@@ -634,6 +833,7 @@
                 alt="Profil"
             >
 
+
             <div
                 id="profileName"
                 class="profile-name"
@@ -641,12 +841,14 @@
                 Telegram Kullanıcısı
             </div>
 
+
             <div
                 id="profileUsername"
                 class="profile-username"
             >
                 @kullanici
             </div>
+
 
             <div class="profile-info">
 
@@ -665,6 +867,7 @@
 
                 </div>
 
+
                 <div class="info-row">
 
                     <div class="info-label">
@@ -680,6 +883,7 @@
 
                 </div>
 
+
                 <div class="info-row">
 
                     <div class="info-label">
@@ -694,6 +898,7 @@
                     </div>
 
                 </div>
+
 
                 <div class="info-row">
 
@@ -716,14 +921,174 @@
 
     </div>
 
+
+    <!-- =================================
+         CÜZDAN
+    ================================= -->
+
+    <div id="walletPage" class="page">
+
+        <div class="top">
+
+            <div class="brand">
+                Ra<span>Trade</span>
+            </div>
+
+            <div class="status">
+                💰 Cüzdan
+            </div>
+
+        </div>
+
+
+        <!-- BAKİYE KARTI -->
+
+        <div class="wallet-card">
+
+            <div class="wallet-label">
+                Kullanılabilir Bakiye
+            </div>
+
+
+            <div class="wallet-balance">
+                $0.00 <span>USDT</span>
+            </div>
+
+
+            <div class="wallet-address-box">
+
+                <div class="wallet-address-title">
+                    Ağ
+                </div>
+
+                <div class="wallet-network">
+                    🟡 USDT — BEP20
+                </div>
+
+            </div>
+
+
+            <div class="wallet-buttons">
+
+                <button
+                    class="wallet-button deposit-button"
+                    onclick="depositComingSoon()"
+                >
+                    📥 Para Yatır
+                </button>
+
+
+                <button
+                    class="wallet-button withdraw-button"
+                    onclick="withdrawComingSoon()"
+                >
+                    📤 Çekim
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- İŞLEM GEÇMİŞİ -->
+
+        <div class="section">
+
+            <div class="section-title">
+                📋 Son İşlemler
+            </div>
+
+
+            <div class="empty">
+
+                <div style="font-size:35px;">
+                    💸
+                </div>
+
+                <div style="margin-top:10px;">
+                    Henüz işlem bulunmuyor.
+                </div>
+
+                <div
+                    style="
+                    margin-top:7px;
+                    font-size:12px;
+                    color:#596477;
+                    "
+                >
+                    Para yatırma veya çekim yaptığında
+                    işlemlerin burada görünecek.
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- =================================
+         İŞLEMLER
+    ================================= -->
+
+    <div id="transactionsPage" class="page">
+
+        <div class="top">
+
+            <div class="brand">
+                Ra<span>Trade</span>
+            </div>
+
+            <div class="status">
+                📊 İşlemler
+            </div>
+
+        </div>
+
+
+        <div class="section">
+
+            <div class="section-title">
+                📊 İşlem Geçmişi
+            </div>
+
+
+            <div class="empty">
+
+                <div style="font-size:35px;">
+                    📊
+                </div>
+
+                <div style="margin-top:10px;">
+                    Henüz işlem yok.
+                </div>
+
+                <div
+                    style="
+                    margin-top:7px;
+                    font-size:12px;
+                    color:#596477;
+                    "
+                >
+                    Trade işlemleri başladığında
+                    burada görünecek.
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
 </div>
 
 
-<!-- ================================= -->
-<!-- ALT MENÜ -->
-<!-- ================================= -->
+<!-- =================================
+     ALT MENÜ
+================================= -->
 
 <div class="nav">
+
 
     <div
         class="nav-item active"
@@ -785,9 +1150,9 @@
 
 <script>
 
-    /* =================================
+    /* =========================
        TELEGRAM
-    ================================= */
+    ========================= */
 
     const tg = window.Telegram.WebApp;
 
@@ -795,9 +1160,9 @@
     tg.expand();
 
 
-    /* =================================
-       SAYFA DEĞİŞTİRME
-    ================================= */
+    /* =========================
+       SAYFA DEĞİŞTİR
+    ========================= */
 
     function showPage(pageId, element) {
 
@@ -835,9 +1200,9 @@
     }
 
 
-    /* =================================
-       TELEGRAM KULLANICI BİLGİLERİ
-    ================================= */
+    /* =========================
+       TELEGRAM KULLANICI
+    ========================= */
 
     if (
         tg.initDataUnsafe &&
@@ -847,8 +1212,6 @@
         const user =
             tg.initDataUnsafe.user;
 
-
-        /* İSİM */
 
         const fullName =
             (
@@ -868,8 +1231,6 @@
             fullName || "Telegram Kullanıcısı";
 
 
-        /* USERNAME */
-
         document
             .getElementById("profileUsername")
             .textContent =
@@ -878,15 +1239,11 @@
                 : "@kullanici";
 
 
-        /* TELEGRAM ID */
-
         document
             .getElementById("profileId")
             .textContent =
             user.id || "-";
 
-
-        /* AD */
 
         document
             .getElementById("profileFirstName")
@@ -894,21 +1251,11 @@
             user.first_name || "-";
 
 
-        /* SOYAD */
-
         document
             .getElementById("profileLastName")
             .textContent =
             user.last_name || "-";
 
-
-        /*
-            Telegram bazı durumlarda
-            profil fotoğraf URL'sini
-            initDataUnsafe içinde vermez.
-
-            Varsa kullanıyoruz.
-        */
 
         if (user.photo_url) {
 
@@ -919,17 +1266,12 @@
 
         }
 
-        console.log(
-            "Telegram User:",
-            user
-        );
-
     }
 
 
-    /* =================================
-       FOTOĞRAF YOKSA
-       ================================= */
+    /* =========================
+       FOTOĞRAF HATA
+    ========================= */
 
     const photo =
         document.getElementById("profilePhoto");
@@ -941,6 +1283,27 @@
 
     };
 
+
+    /* =========================
+       ŞİMDİLİK BUTONLAR
+    ========================= */
+
+    function depositComingSoon() {
+
+        alert(
+            "📥 Para yatırma sistemi yakında aktif olacak."
+        );
+
+    }
+
+
+    function withdrawComingSoon() {
+
+        alert(
+            "📤 Çekim sistemi yakında aktif olacak."
+        );
+
+    }
 
 </script>
 
