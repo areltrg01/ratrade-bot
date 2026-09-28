@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+from web3 import Web3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, ROUND_DOWN
 
