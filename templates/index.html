@@ -1,12 +1,369 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoTrade</title>
+    <title>RaTrade</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #070b14;
+            color: white;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .app {
+            max-width: 500px;
+            margin: auto;
+            min-height: 100vh;
+            padding-bottom: 90px;
+        }
+
+        /* TOP */
+        .top {
+            padding: 22px 20px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .brand {
+            font-size: 23px;
+            font-weight: 800;
+        }
+
+        .brand span {
+            color: #36e0a0;
+        }
+
+        .status {
+            background: rgba(54,224,160,.1);
+            border: 1px solid rgba(54,224,160,.25);
+            color: #36e0a0;
+            padding: 7px 11px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+
+        /* BALANCE */
+        .balance {
+            margin: 18px 18px 12px;
+            padding: 22px;
+            border-radius: 24px;
+            background:
+                radial-gradient(circle at top right, rgba(54,224,160,.20), transparent 45%),
+                linear-gradient(145deg,#111827,#0c1220);
+            border: 1px solid rgba(255,255,255,.07);
+            box-shadow: 0 15px 40px rgba(0,0,0,.25);
+        }
+
+        .small {
+            color: #8993a5;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .money {
+            font-size: 34px;
+            font-weight: 800;
+        }
+
+        .money span {
+            color: #36e0a0;
+            font-size: 20px;
+        }
+
+        .profit {
+            margin-top: 10px;
+            color: #36e0a0;
+            font-size: 13px;
+        }
+
+        /* TRADE CARD */
+        .section {
+            padding: 10px 18px;
+        }
+
+        .section-title {
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .trade {
+            background: #101722;
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 22px;
+            padding: 18px;
+        }
+
+        .coin {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .coin-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: #f7931a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 22px;
+        }
+
+        .coin-name {
+            font-weight: 700;
+        }
+
+        .coin-sub {
+            color: #788398;
+            font-size: 12px;
+            margin-top: 3px;
+        }
+
+        .trade-status {
+            margin-left: auto;
+            color: #36e0a0;
+            font-size: 12px;
+        }
+
+        .chart {
+            height: 100px;
+            margin: 20px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .chart-line {
+            fill: none;
+            stroke: #36e0a0;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 500;
+            animation: draw 2s ease forwards;
+        }
+
+        @keyframes draw {
+            from { stroke-dashoffset: 500; }
+            to { stroke-dashoffset: 0; }
+        }
+
+        .trade-button {
+            width: 100%;
+            border: none;
+            padding: 15px;
+            border-radius: 15px;
+            background: linear-gradient(135deg,#36e0a0,#19b87c);
+            color: #06110c;
+            font-weight: 800;
+            font-size: 15px;
+        }
+
+        /* STATS */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2,1fr);
+            gap: 10px;
+        }
+
+        .stat {
+            background: #101722;
+            border: 1px solid rgba(255,255,255,.05);
+            padding: 15px;
+            border-radius: 17px;
+        }
+
+        .stat-label {
+            color: #7d8798;
+            font-size: 12px;
+        }
+
+        .stat-value {
+            margin-top: 7px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        /* COUNTDOWN */
+        .countdown {
+            margin-top: 10px;
+            text-align: center;
+            padding: 17px;
+            border-radius: 18px;
+            background: #101722;
+        }
+
+        .countdown-title {
+            color: #8993a5;
+            font-size: 12px;
+        }
+
+        .time {
+            margin-top: 7px;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        /* BOTTOM NAV */
+        .nav {
+            position: fixed;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 24px);
+            max-width: 476px;
+            background: rgba(15,22,34,.95);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 22px;
+            display: grid;
+            grid-template-columns: repeat(4,1fr);
+            padding: 8px;
+            z-index: 100;
+        }
+
+        .nav-item {
+            text-align: center;
+            padding: 8px 2px;
+            color: #707b8f;
+            font-size: 11px;
+        }
+
+        .nav-item.active {
+            color: #36e0a0;
+        }
+
+        .nav-icon {
+            font-size: 21px;
+            display: block;
+            margin-bottom: 3px;
+        }
+    </style>
 </head>
+
 <body>
-    <h1>🤖 AutoTrade</h1>
-    <p>Mini App hazırlanıyor...</p>
+
+<div class="app">
+
+    <div class="top">
+        <div class="brand">Ra<span>Trade</span></div>
+        <div class="status">● Sistem Aktif</div>
+    </div>
+
+    <div class="balance">
+        <div class="small">Toplam Bakiye</div>
+        <div class="money">$0.00 <span>USDT</span></div>
+        <div class="profit">▲ +0.00% bugün</div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">🤖 Otomatik Trade</div>
+
+        <div class="trade">
+
+            <div class="coin">
+                <div class="coin-icon">₿</div>
+
+                <div>
+                    <div class="coin-name">BTC / USDT</div>
+                    <div class="coin-sub">Bitcoin</div>
+                </div>
+
+                <div class="trade-status">● AKTİF</div>
+            </div>
+
+            <div class="chart">
+                <svg viewBox="0 0 400 100" preserveAspectRatio="none">
+                    <polyline
+                        class="chart-line"
+                        points="0,80 35,70 70,78 105,50 140,60 175,35 210,45 245,25 280,38 315,15 350,28 400,8"
+                    />
+                </svg>
+            </div>
+
+            <button class="trade-button">
+                🚀 Trade Sistemini Aç
+            </button>
+
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">📊 İstatistikler</div>
+
+        <div class="stats">
+
+            <div class="stat">
+                <div class="stat-label">Toplam İşlem</div>
+                <div class="stat-value">0</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-label">Başarılı İşlem</div>
+                <div class="stat-value">0</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-label">Toplam Kazanç</div>
+                <div class="stat-value">$0.00</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-label">Bot Durumu</div>
+                <div class="stat-value" style="color:#36e0a0;">Aktif</div>
+            </div>
+
+        </div>
+
+        <div class="countdown">
+            <div class="countdown-title">Sistem yenilenmesine kalan süre</div>
+            <div class="time">23:59:59</div>
+        </div>
+    </div>
+
+</div>
+
+<div class="nav">
+
+    <div class="nav-item active">
+        <span class="nav-icon">🏠</span>
+        Ana Sayfa
+    </div>
+
+    <div class="nav-item">
+        <span class="nav-icon">👤</span>
+        Profil
+    </div>
+
+    <div class="nav-item">
+        <span class="nav-icon">💰</span>
+        Cüzdan
+    </div>
+
+    <div class="nav-item">
+        <span class="nav-icon">📊</span>
+        İşlemler
+    </div>
+
+</div>
+
 </body>
 </html>
