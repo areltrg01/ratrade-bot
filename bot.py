@@ -1136,6 +1136,7 @@ def buy_symbol(symbol):
 
     try:
         balance = get_usdt_balance()
+        print(f"[BALANCE CHECK] Binance USDT free bakiye: {balance:.8f}")
         if balance <= 0:
             print("[BUY] USDT yok.")
             return False
