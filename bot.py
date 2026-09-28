@@ -39,6 +39,21 @@ def health():
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# =========================================================
+# BSC MAINNET DEPOSIT
+# =========================================================
+
+BSC_RPC_URL = "https://bsc-dataseed.bnbchain.org"
+BSC_CHAIN_ID = 56
+
+DEPOSIT_ADDRESS = "0x41808d5b2Db66f76797aa1F7FB6b481f9454342f"
+
+# BSC üzerindeki USDT kontratı
+USDT_CONTRACT = "0x55d398326f99059fF775485246999027B3197955"
+
+print("BSC MAINNET DEPOSIT AYARLARI HAZIR")
+print("DEPOSIT:", DEPOSIT_ADDRESS)
+print("CHAIN ID:", BSC_CHAIN_ID)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
